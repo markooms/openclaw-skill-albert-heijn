@@ -20,19 +20,6 @@
 
   "butcher_items": [],
 
-  "favorite_lists": {
-    "weekly": {
-      "id": "",
-      "name": "Wekelijks",
-      "frequency": "weekly"
-    },
-    "biweekly": {
-      "id": "",
-      "name": "Twee Wekelijks",
-      "frequency": "biweekly"
-    }
-  },
-
   "cuisine_preferences": {
     "liked": [],
     "disliked": []

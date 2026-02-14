@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy this to weekly-basics.json and fill in your weekly staples. Use 'appie-cli search <product>' to find IDs.",
+
+  "weekly": [
+    {"id": 0, "name": "voorbeeld: halfvolle melk", "qty": 2},
+    {"id": 0, "name": "voorbeeld: volkoren brood", "qty": 1}
+  ],
+
+  "biweekly": [
+    {"id": 0, "name": "voorbeeld: afwasmiddel", "qty": 1}
+  ]
+}

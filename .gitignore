@@ -3,9 +3,9 @@
 
 # User-specific files
 config.json
+weekly-basics.json
 taste-profile.md
 meal-history.json
-product-cache.json
 product-cache.json
 
 # Build artifacts
