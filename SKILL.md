@@ -44,35 +44,43 @@ This should return product results (no login required for search).
 
 ### Step 3: User Login (requires human interaction!)
 
-This is the critical step. The user must log in via their browser — you cannot do this for them.
+The user must log in via their browser. You cannot do this for them.
 
-1. Generate the login URL:
+**Easiest method: local login page**
+
+```bash
+appie-cli login
+```
+
+This starts a local web page. Send the URL (http://127.0.0.1:PORT) to the user. The page guides them through login with 3 simple steps:
+1. Click the login button to open AH login
+2. Log in with their AH account
+3. After the redirect fails (that's normal), paste the URL from their address bar into the form
+
+The CLI automatically exchanges the code and saves tokens. Done.
+
+**Manual method (fallback):**
+
+If the local server doesn't work (e.g. remote environments), use the manual flow:
+
 ```bash
 appie-cli login-url
 ```
 
-2. **Send this URL to the user** and explain the following:
-   - Open **Developer Tools** in your browser first (F12), go to the **Network** tab, and enable **Preserve log**
-   - Then open the login link and log in with your Albert Heijn account
-   - After login, the browser tries to redirect to `appie://login-exit?code=XXXXX` — this will fail with an error, **that's normal** (it's a mobile app link)
-   - In the Network tab, find **`ingelogd.json`**
-   - Click it → look at the **Response** tab — you'll see:
-     ```json
-     "pageProps": { "__N_REDIRECT": "appie://login-exit?code=XXXXX" }
-     ```
-   - Copy the code (everything after `code=`) and send it back to me
+Send the URL to the user. After login, the browser tries to redirect to `appie://login-exit?code=XXXXX` which fails. The user copies the full URL (or just the code) and sends it back. Then:
 
-3. Once the user gives you the code:
 ```bash
-appie-cli exchange-code <the-code-they-sent>
+# Both work: full URL or just the code
+appie-cli exchange-code "appie://login-exit?code=XXXXX"
+appie-cli exchange-code XXXXX
 ```
 
-4. Verify login worked:
+Verify login:
 ```bash
 appie-cli member
 ```
 
-This should show their member profile. Tokens are saved to `.appie.json` and auto-refresh — the user only needs to do this once.
+Tokens are saved to `.appie.json` and auto-refresh. The user only needs to do this once.
 
 ### Step 4: Configure preferences
 
