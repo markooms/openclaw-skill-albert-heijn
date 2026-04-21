@@ -175,7 +175,7 @@ func main() {
 
 	case "shopping-list":
 		client := mustAuth(ctx, configPath)
-		list, err := client.GetShoppingList(ctx)
+		list, err := getShoppingListV2(ctx, client)
 		if err != nil {
 			fatal("Get shopping list failed: %v", err)
 		}
@@ -252,10 +252,16 @@ func main() {
 
 	case "clear-list":
 		client := mustAuth(ctx, configPath)
-		if err := client.ClearShoppingList(ctx); err != nil {
+		removed, skipped, remaining, err := clearShoppingListV2(ctx, client)
+		if err != nil {
 			fatal("Clear list failed: %v", err)
 		}
-		fmt.Println(`{"ok": true}`)
+		printJSON(map[string]any{
+			"ok":        true,
+			"removed":   removed,
+			"skipped":   skipped,
+			"remaining": remaining,
+		})
 
 	case "order":
 		client := mustAuth(ctx, configPath)
@@ -374,12 +380,12 @@ func printUsage() {
 		"bonus                  Get spotlight bonus products",
 		"receipts               List receipts (kassabonnen)",
 		"receipt <id>           Get receipt details",
-		"shopping-list          Show shopping list",
-		"shopping-lists         List all shopping lists",
-		"add-to-list <id> [qty] Add product to shopping list",
+		"shopping-list          Show AH app shopping list (v2)",
+		"shopping-lists         List favorite lists (v3)",
+		"add-to-list <id> [qty] Add product to AH app shopping list",
 		"add-to-list --text \"item\" [qty]  Add free text item",
-		"batch-add              Add multiple items from stdin (JSON array)",
-		"clear-list             Clear shopping list",
+		"batch-add              Add multiple items to AH app shopping list",
+		"clear-list             Clear AH app shopping list (v2)",
 		"order                  Show current order",
 		"add-to-order <id> [qty] Add product to order",
 		"search-recipes [query] [n] Search Allerhande recipes",
@@ -425,6 +431,148 @@ func printJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.Encode(v)
+}
+
+const (
+	v2ShoppingListURL   = "https://api.ah.nl/mobile-services/shoppinglist/v2/items?orderBy=userInput&orderByParam=0"
+	directClientName    = "appie-ios"
+	directClientVersion = "9.28"
+	directUserAgent     = "Appie/9.28 (iPhone; iOS)"
+)
+
+type shoppingListV2 struct {
+	ID                   string               `json:"id"`
+	Items                []shoppingListV2Item `json:"items"`
+	DateLastSynced       string               `json:"dateLastSynced,omitempty"`
+	DateLastSyncedMillis int64                `json:"dateLastSyncedMillis,omitempty"`
+	ActiveSorting        string               `json:"activeSorting,omitempty"`
+	StoreNumber          int                  `json:"storeNumber,omitempty"`
+}
+
+type shoppingListV2Item struct {
+	ListItemID     int                           `json:"listItemId"`
+	Strikedthrough bool                          `json:"strikedthrough"`
+	Quantity       int                           `json:"quantity"`
+	Type           string                        `json:"type"`
+	OriginCode     string                        `json:"originCode"`
+	Position       int                           `json:"position"`
+	Description    string                        `json:"description,omitempty"`
+	ProductDetails *shoppingListV2ProductDetails `json:"productDetails,omitempty"`
+}
+
+type shoppingListV2ProductDetails struct {
+	Product shoppingListV2Product `json:"product"`
+}
+
+type shoppingListV2Product struct {
+	WebshopID int    `json:"webshopId"`
+	Title     string `json:"title"`
+}
+
+type shoppingListV2PatchItem struct {
+	Description   string `json:"description,omitempty"`
+	ProductID     int    `json:"productId,omitempty"`
+	Quantity      int    `json:"quantity"`
+	Type          string `json:"type"`
+	OriginCode    string `json:"originCode"`
+	StrikeThrough bool   `json:"strikeThrough"`
+}
+
+func doShoppingListV2Request(ctx context.Context, client *appie.Client, method string, body any, result any) error {
+	var bodyReader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, v2ShoppingListURL, bodyReader)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-application", "AHWEBSHOP")
+	req.Header.Set("x-client-name", directClientName)
+	req.Header.Set("x-client-version", directClientVersion)
+	req.Header.Set("User-Agent", directUserAgent)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("API error: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	if result != nil {
+		if err := json.Unmarshal(respBody, result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func getShoppingListV2(ctx context.Context, client *appie.Client) (*shoppingListV2, error) {
+	var result shoppingListV2
+	if err := doShoppingListV2Request(ctx, client, http.MethodGet, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func clearShoppingListV2(ctx context.Context, client *appie.Client) (removed int, skipped int, remaining int, err error) {
+	list, err := getShoppingListV2(ctx, client)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	patchItems := make([]shoppingListV2PatchItem, 0, len(list.Items))
+	for _, item := range list.Items {
+		switch {
+		case item.ProductDetails != nil && item.ProductDetails.Product.WebshopID > 0:
+			patchItems = append(patchItems, shoppingListV2PatchItem{
+				ProductID:     item.ProductDetails.Product.WebshopID,
+				Quantity:      0,
+				Type:          "SHOPPABLE",
+				OriginCode:    "PRD",
+				StrikeThrough: false,
+			})
+		case item.Description != "":
+			patchItems = append(patchItems, shoppingListV2PatchItem{
+				Description:   item.Description,
+				Quantity:      0,
+				Type:          "SHOPPABLE",
+				OriginCode:    "PRD",
+				StrikeThrough: false,
+			})
+		default:
+			skipped++
+		}
+	}
+
+	if len(patchItems) == 0 {
+		return 0, skipped, len(list.Items), nil
+	}
+
+	var updated shoppingListV2
+	body := map[string]any{"items": patchItems}
+	if err := doShoppingListV2Request(ctx, client, http.MethodPatch, body, &updated); err != nil {
+		return 0, skipped, 0, err
+	}
+
+	return len(patchItems), skipped, len(updated.Items), nil
 }
 
 // getListItems fetches items for a specific list via REST API
